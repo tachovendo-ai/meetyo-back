@@ -5,7 +5,7 @@ from ..services.ollama_client import ask_ollama
 router = APIRouter()
 
 SYSTEM_PROMPT = """
-Você é um assistente de CLIMA do Meetyou.
+Você é um assistente de CLIMA do Meetyo.
 Regras:
 - Escreva SOMENTE em português do Brasil, claro e natural.
 - Seja curto e direto. NÃO use <think>. NÃO explique o processo.
