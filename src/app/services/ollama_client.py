@@ -3,7 +3,6 @@ import requests
 
 OLLAMA_URL = "http://localhost:11434"
 
-# remove blocos de raciocínio oculto do modelo
 _THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
 
 def _strip_think(text: str) -> str:
@@ -18,15 +17,14 @@ def ask_ollama(prompt: str, model: str = "deepseek-r1:7b") -> str:
                 "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.2,  # respostas mais estáveis
-                    "num_ctx": 4096      # mais contexto, se suportado
+                    "temperature": 0.1,
+                    "num_ctx": 2048
                 }
             },
-            timeout=120,
+            timeout=600,
         )
         r.raise_for_status()
         data = r.json()
-        answer = data.get("response", "")
-        return _strip_think(answer)
+        return _strip_think(data.get("response", ""))
     except Exception as e:
         return f"[ERRO] Não consegui falar com o Ollama: {e}"
