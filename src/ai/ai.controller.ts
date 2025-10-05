@@ -2,6 +2,7 @@ import { Body, Controller, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AiService } from './ai.service';
 import { WeatherService } from '../weather/weather.service';
+import { ApiBody, ApiConsumes } from '@nestjs/swagger';
 
 // Booleans no body (forma pedida) -> montamos o objeto filtros aqui
 type Filtros = { temperatura: boolean; chuva: boolean; vento: boolean; umidade: boolean };
@@ -9,13 +10,13 @@ type Filtros = { temperatura: boolean; chuva: boolean; vento: boolean; umidade: 
 class AdviceRequestDto {
   latitude!: number;
   longitude!: number;
-  date!: string;           // aceita "YYYY-MM-DD" ou "YYYYMMDD"
+  date!: string;           // "YYYY-MM-DD" ou "YYYYMMDD"
   rangeYears?: number;     // padrão 5
-  temperatura!: boolean;   // booleans avulsos (não dentro de um objeto "filtros")
+  temperatura!: boolean;
   chuva!: boolean;
   vento!: boolean;
   umidade!: boolean;
-  question?: string;       // intenção opcional do usuário
+  question?: string;
 }
 
 // Payload esperado pelo AiService (meta + deterministic.daily)
@@ -80,6 +81,45 @@ export class AiController {
       },
     };
   }
+
+
+  @ApiConsumes('application/json')
+  @ApiBody({
+    description: 'Parâmetros para obter o conselho do agente a partir do motor climático.',
+    required: true,
+    examples: {
+      PiqueniqueChuvoso: {
+        summary: 'Cenário chuvoso (90%), sem vento, igual ao retorno do seu motor',
+        description:
+          'O controller normaliza a data (YYYY-MM-DD -> YYYYMMDD), chama o WeatherService com os filtros e envia o contexto para a IA (Gemini) gerar o card de conselho.',
+        value: {
+          latitude: -12.74,
+          longitude: -60.15,
+          date: "2025-10-05",
+          rangeYears: 10,
+          temperatura: true,
+          chuva: true,
+          vento: false,
+          umidade: true,
+          question: "Quero um piquenique às 16h, vale a pena?"
+        }
+      },
+      CompletoComVento: {
+        summary: 'Exemplo completo (todos os filtros ligados)',
+        value: {
+          latitude: -23.55,
+          longitude: -46.64,
+          date: "2025-10-05",
+          rangeYears: 5,
+          temperatura: true,
+          chuva: true,
+          vento: true,
+          umidade: true,
+          question: "Evento corporativo ao ar livre entre 10h e 14h — recomendações?"
+        }
+      }
+    }
+  })
 
   @Post('advice')
   @ApiOperation({ summary: 'Conselhos de IA Climático (GO | ADJUST | DELAY)' })
