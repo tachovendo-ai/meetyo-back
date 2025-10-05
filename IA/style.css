@@ -1,0 +1,65 @@
+/* --- Estilo para o Container de Insights do Clima --- */
+
+/* Use uma fonte bonita, se desejar */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+
+.insights-container {
+    font-family: 'Poppins', sans-serif;
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 25px 30px;
+    max-width: 500px;
+    margin: 20px auto; /* Para centralizar na página */
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e0e0e0;
+}
+
+.insights-container h2 {
+    text-align: center;
+    color: #333;
+    font-size: 1.5em;
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+.insights-container .climate-summary {
+    font-size: 1.1em;
+    color: #555;
+    line-height: 1.6;
+    text-align: center;
+    border-bottom: 1px dashed #ccc;
+    padding-bottom: 15px;
+    margin-bottom: 15px;
+}
+
+.insights-container .insights-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.insights-container .insights-list li {
+    background-color: #f9f9f9;
+    border-left: 4px solid #007bff; /* Cor primária */
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 0 8px 8px 0;
+    color: #444;
+}
+
+.insights-container .insights-list strong {
+    color: #007bff; /* Cor primária */
+    display: block;
+    margin-bottom: 5px;
+}
+
+.insights-container .call-to-action {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #e6f2ff;
+    border-radius: 8px;
+    text-align: center;
+    font-style: italic;
+    color: #0056b3;
+    font-weight: 500;
+}
