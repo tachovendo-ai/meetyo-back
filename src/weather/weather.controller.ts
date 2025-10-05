@@ -15,34 +15,33 @@ export class WeatherController {
     @ApiQuery({ name: 'date', required: true, type: String, example: '20251120' })
     @ApiQuery({ name: 'rangeYears', required: true, type: Number, example: 10 })
 
-    // ✅ ADICIONADO: Documentação para os novos filtros no Swagger
     @ApiQuery({
-        name: 'temperatura',
-        required: false, // O filtro é opcional
+        name: 'temperature',
+        required: false, // The filter is optional
         type: Boolean,
         example: true,
-        description: 'Incluir dados de temperatura na análise. Padrão: true.',
+        description: 'Include temperature data in the analysis. Default: true.',
     })
     @ApiQuery({
-        name: 'chuva',
+        name: 'rain',
         required: false,
         type: Boolean,
         example: true,
-        description: 'Incluir dados de chuva na análise. Padrão: true.',
+        description: 'Include rain data in the analysis. Default: true.',
     })
     @ApiQuery({
-        name: 'vento',
+        name: 'wind',
         required: false,
         type: Boolean,
         example: false,
-        description: 'Incluir dados de vento na análise. Padrão: true.',
+        description: 'Include wind data in the analysis. Default: true.',
     })
     @ApiQuery({
-        name: 'umidade',
+        name: 'humidity',
         required: false,
         type: Boolean,
         example: true,
-        description: 'Incluir dados de umidade na análise. Padrão: true.',
+        description: 'Include humidity data in the analysis. Default: true.',
     })
     async findAll(
         // Parâmetros obrigatórios
@@ -52,10 +51,10 @@ export class WeatherController {
         @Query('rangeYears') rangeYears: number,
 
         // ✅ ADICIONADO: Parâmetros de filtro opcionais com valores padrão
-        @Query('temperatura', new DefaultValuePipe(true), ParseBoolPipe) temperatura: boolean,
-        @Query('chuva', new DefaultValuePipe(true), ParseBoolPipe) chuva: boolean,
-        @Query('vento', new DefaultValuePipe(true), ParseBoolPipe) vento: boolean,
-        @Query('umidade', new DefaultValuePipe(true), ParseBoolPipe) umidade: boolean,
+        @Query('temperature', new DefaultValuePipe(true), ParseBoolPipe) temperatura: boolean,
+        @Query('rain', new DefaultValuePipe(true), ParseBoolPipe) chuva: boolean,
+        @Query('wind', new DefaultValuePipe(true), ParseBoolPipe) vento: boolean,
+        @Query('humidity', new DefaultValuePipe(true), ParseBoolPipe) umidade: boolean,
     ) {
         // Monta o objeto de filtros para enviar ao serviço
         const filtros: Filtros = {
