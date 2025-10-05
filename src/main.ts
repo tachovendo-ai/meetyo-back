@@ -11,7 +11,7 @@ async function bootstrap() {
         swaggerOptions: { persistAuthorization: true },
     });
 
-    // --- Inicia a aplicação ---
+    
     await app.listen(3000);
     console.log('🚀 Swagger rodando em: http://localhost:3000/docs');
 }

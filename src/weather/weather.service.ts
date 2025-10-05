@@ -1,194 +1,311 @@
-import { Injectable } from '@nestjs/common'
-import axios from 'axios'
+import { Injectable } from '@nestjs/common';
+import axios from 'axios';
 
-export interface AnoStatus {
-  [ano: number]: {
-    chuva: boolean
-    sol: boolean
-    tempMedia: string
-  }
+// =============================================================================
+// INTERFACES DE DADOS
+// =============================================================================
+
+export interface Filtros {
+  temperatura: boolean;
+  chuva: boolean;
+  vento: boolean;
+  umidade: boolean;
 }
 
 export interface Contagem {
-  quente: number
-  frio: number
-  chuva: number
-  vento: number
-  desconforto: number
-  total: number
+  muitoQuente: number;
+  quente: number;
+  frio: number;
+  chuva: number;
+  muitoVentoso: number;
+  ventoso: number;
+  calmo: number;
+  desconforto: number;
+  total: number;
 }
 
-export interface Probabilidade {
-  quente: string
-  frio: string
-  chuva: string
-  vento: string
-  desconforto: string
-}
-
-export interface WeatherResponse {
-  probabilidade: Probabilidade
-  probabilidadePorHora: Record<string, Probabilidade>
-  tempMedia: string
-  confiabilidade: string
-  anosStatus: AnoStatus
-  // results: any[]
-}
+// =============================================================================
+// CONSTANTES DE CLASSIFICAÇÃO
+// =============================================================================
+const LIMIAR_FRIO_C = 20;
+const LIMIAR_QUENTE_C = 30;
+const LIMIAR_MUITO_QUENTE_C = 35;
+const LIMIAR_VENTO_VENTOSO_MS = 5;
+const LIMIAR_VENTO_MUITO_VENTOSO_MS = 10;
+const LIMIAR_CHUVA_HORA_MM = 0.1;
+const LIMIAR_CHUVA_DIA_MM = 1.0;
+const LIMIAR_DESCONFORTO_HEAT_INDEX_C = 35;
 
 @Injectable()
 export class WeatherService {
+  private calcularIndiceDeCalor(temperatura: number, umidade: number): number {
+    if (temperatura < 27 || umidade < 40) {
+      return temperatura;
+    }
+    const T = temperatura;
+    const RH = umidade;
+    const HI =
+      -8.78469475556 +
+      1.61139411 * T +
+      2.33854883889 * RH -
+      0.14611605 * T * RH -
+      0.012308094 * T * T -
+      0.0164248277778 * RH * RH +
+      0.002211732 * T * T * RH +
+      0.00072546 * T * RH * RH -
+      0.000003582 * T * T * RH * RH;
+    return HI;
+  }
+
+  private encontrarCategoriaMaisProvavel(probabilidades: Record<string, string>): string {
+    let maisProvavel = 'indefinido';
+    let maxProb = -1;
+
+    for (const [categoria, probStr] of Object.entries(probabilidades)) {
+      const probNum = parseFloat(probStr);
+      if (probNum > maxProb) {
+        maxProb = probNum;
+        maisProvavel = categoria;
+      }
+    }
+    return maisProvavel;
+  }
+
   async findAll(
     latitude: number,
     longitude: number,
     date: string,
-    rangeYears: number
-  ): Promise<WeatherResponse | null> {
-    const mesDia = date.slice(4)
-    const anoAtual = new Date().getFullYear()
+    rangeYears: number,
+    filtros: Filtros,
+  ): Promise<any | null> {
+    const parametrosApi:string[] = [];
+    if (filtros.temperatura) parametrosApi.push('T2M');
+    if (filtros.chuva) parametrosApi.push('PRECTOTCORR');
+    if (filtros.vento) parametrosApi.push('WS2M');
+    if (filtros.umidade || (filtros.temperatura && filtros.umidade)) {
+      parametrosApi.push('RH2M');
+    }
+
+    if (parametrosApi.length === 0) {
+      return { mensagem: 'Nenhum filtro selecionado.' };
+    }
+
+    const mesDia = date.slice(4);
+    const anoAtual = new Date().getFullYear();
 
     const contagem: Contagem = {
-      quente: 0,
-      frio: 0,
-      chuva: 0,
-      vento: 0,
-      desconforto: 0,
-      total: 0,
-    }
+      muitoQuente: 0, quente: 0, frio: 0, chuva: 0,
+      muitoVentoso: 0, ventoso: 0, calmo: 0, desconforto: 0, total: 0,
+    };
 
-    // 👇 contagens por hora (00 a 23)
-    const contagemPorHora: Record<string, Contagem> = {}
+    const contagemPorHora: Record<string, Contagem> = {};
+    // ✅ ADICIONADO: Estrutura para calcular a média de umidade por hora
+    const umidadePorHora: Record<string, { soma: number; count: number }> = {};
+
     for (let h = 0; h < 24; h++) {
-      const hora = h.toString().padStart(2, '0')
-      contagemPorHora[hora] = {
-        quente: 0,
-        frio: 0,
-        chuva: 0,
-        vento: 0,
-        desconforto: 0,
-        total: 0,
-      }
+      const horaStr = h.toString().padStart(2, '0');
+      contagemPorHora[horaStr] = {
+        muitoQuente: 0, quente: 0, frio: 0, chuva: 0,
+        muitoVentoso: 0, ventoso: 0, calmo: 0, desconforto: 0, total: 0,
+      };
+      umidadePorHora[horaStr] = { soma: 0, count: 0 };
     }
 
-    let somaTemp = 0
-    let anosValidos = 0
-    const anosStatus: AnoStatus = {}
+    let somaTempGeral = 0, somaUmidGeral = 0;
+    let anosValidos = 0;
 
-    const requests: Promise<any>[] = []
+    const requests = Array.from({ length: rangeYears }, (_, i) => {
+      const ano = anoAtual - (i + 1);
+      const dataHist = `${ano}${mesDia}`;
+      const url = `https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=${parametrosApi.join(',')}&community=AG&longitude=${longitude}&latitude=${latitude}&start=${dataHist}&end=${dataHist}&format=JSON`;
+      return axios.get(url).then(res => ({ data: res.data, ano })).catch(() => null);
+    });
 
-    for (let i = 0; i < rangeYears; i++) {
-      const ano = anoAtual - (i + 1)
-      const dataHist = `${ano}${mesDia}`
-      const url = `https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=T2M,PRECTOTCORR,WS2M&community=RE&longitude=${longitude}&latitude=${latitude}&start=${dataHist}&end=${dataHist}&format=JSON`
+    const results = await Promise.all(requests);
 
-      requests.push(
-        axios
-          .get(url)
-          .then((res) => res.data)
-          .catch(() => null)
-      )
-    }
+    for (const response of results) {
+      if (!response?.data?.properties?.parameter) continue;
 
-    const results = await Promise.all(requests)
+      const p = response.data.properties.parameter;
+      const ano = response.ano;
 
-    results.forEach((json, idx) => {
-      if (!json?.properties?.parameter) return
-      const p = json.properties.parameter
-      const horas = Object.keys(p.T2M || {})
+      if (!p.T2M && filtros.temperatura) continue;
 
-      if (horas.length === 0) return
+      const horas = Object.keys(p.T2M || p.PRECTOTCORR || p.WS2M || p.RH2M || {});
+      if (horas.length === 0) continue;
 
-      let somaT = 0
-      let countT = 0
-      let chuvaDia = 0
-      let ventoDia = 0
-      let tmax = -Infinity
-      let tmin = Infinity
+      let somaTempDia = 0, countTempDia = 0, somaUmidDia = 0, countUmidDia = 0;
+      let chuvaTotalDia = 0, ventoMaxDia = 0, indiceCalorMax = -Infinity, tmax = -Infinity, tmin = Infinity;
 
-      horas.forEach((h) => {
-        const hora = h.slice(-2) // ex: 20240425Z09 → '09'
-        const t = p.T2M[h]
-        const chuva = p.PRECTOTCORR[h]
-        const vento = p.WS2M[h]
+      for (const h of horas) {
+        const hora = h.slice(-2);
+        const ch = contagemPorHora[hora];
+        if (!ch) continue;
 
-        if (t !== -999) {
-          somaT += t
-          countT++
-          if (t > tmax) tmax = t
-          if (t < tmin) tmin = t
+        const t = p.T2M?.[h];
+        const chuva = p.PRECTOTCORR?.[h];
+        const vento = p.WS2M?.[h];
+        const umidade = p.RH2M?.[h];
+
+        let processouHora = false;
+
+        if (filtros.temperatura && t !== -999) {
+          somaTempDia += t;
+          countTempDia++;
+          if (t > tmax) tmax = t;
+          if (t < tmin) tmin = t;
+
+          if (t > LIMIAR_MUITO_QUENTE_C) ch.muitoQuente++;
+          else if (t > LIMIAR_QUENTE_C) ch.quente++;
+          if (t < LIMIAR_FRIO_C) ch.frio++;
+          processouHora = true;
         }
 
-        if (chuva !== -999) chuvaDia += chuva
-        if (vento !== -999 && vento > ventoDia) ventoDia = vento
-
-        // 🕒 Contagem por hora
-        const ch = contagemPorHora[hora]
-        if (!ch) return
-
-        if (t !== -999) {
-          if (t > 30) ch.quente++
-          if (t < 20) ch.frio++
+        if (filtros.umidade && umidade !== -999) {
+          somaUmidDia += umidade;
+          countUmidDia++;
+          // ✅ ADICIONADO: Acumula dados para a média horária de umidade
+          const u_hora = umidadePorHora[hora];
+          u_hora.soma += umidade;
+          u_hora.count++;
         }
-        if (chuva !== -999 && chuva > 0.1) ch.chuva++
-        if (vento !== -999 && vento > 10) ch.vento++
-        if ((t > 30 && chuva > 0.1) || (vento > 10 && chuva > 0.1))
-          ch.desconforto++
-        ch.total++
-      })
 
-      if (countT === 0) return
-      anosValidos++
+        if (filtros.temperatura && filtros.umidade && t !== -999 && umidade !== -999) {
+          const hi = this.calcularIndiceDeCalor(t, umidade);
+          if (hi > indiceCalorMax) indiceCalorMax = hi;
+          if (hi > LIMIAR_DESCONFORTO_HEAT_INDEX_C) ch.desconforto++;
+        }
 
-      const tempMedia = somaT / countT
-      const ano = anoAtual - (idx + 1)
+        if (filtros.chuva && chuva > 0) {
+          chuvaTotalDia += chuva;
+          if (chuva > LIMIAR_CHUVA_HORA_MM) ch.chuva++;
+          processouHora = true;
+        }
 
-      if (tmax > 30) contagem.quente++
-      if (tmin < 20) contagem.frio++
-      if (chuvaDia > 1) contagem.chuva++
-      if (ventoDia > 10) contagem.vento++
-      if ((tmax > 30 && chuvaDia > 1) || (ventoDia > 10 && chuvaDia > 1))
-        contagem.desconforto++
+        if (filtros.vento && vento !== -999) {
+          if (vento > ventoMaxDia) ventoMaxDia = vento;
+          if (vento > LIMIAR_VENTO_MUITO_VENTOSO_MS) ch.muitoVentoso++;
+          else if (vento > LIMIAR_VENTO_VENTOSO_MS) ch.ventoso++;
+          else ch.calmo++;
+          processouHora = true;
+        }
 
-      somaTemp += tempMedia
-      contagem.total++
-
-      anosStatus[ano] = {
-        chuva: chuvaDia > 1,
-        sol: tmax > 20 && chuvaDia < 1,
-        tempMedia: tempMedia.toFixed(1),
+        if (processouHora) ch.total++;
       }
-    })
 
-    if (contagem.total === 0) return null
+      if (countTempDia === 0 && filtros.temperatura) continue;
+      anosValidos++;
 
-    const prob = (x: number) => ((x / contagem.total) * 100).toFixed(1)
-    const probPorHora = (x: number, total: number) =>
-      total > 0 ? ((x / total) * 100).toFixed(1) : '0.0'
+      if (filtros.temperatura && countTempDia > 0) {
+        somaTempGeral += somaTempDia / countTempDia;
+        if (tmax > LIMIAR_MUITO_QUENTE_C) contagem.muitoQuente++;
+        else if (tmax > LIMIAR_QUENTE_C) contagem.quente++;
+        if (tmin < LIMIAR_FRIO_C) contagem.frio++;
+      }
+      if (filtros.umidade && countUmidDia > 0) {
+        somaUmidGeral += somaUmidDia / countUmidDia;
+      }
+      if (filtros.chuva && chuvaTotalDia > LIMIAR_CHUVA_DIA_MM) contagem.chuva++;
+      if (filtros.vento) {
+        if (ventoMaxDia > LIMIAR_VENTO_MUITO_VENTOSO_MS) contagem.muitoVentoso++;
+        else if (ventoMaxDia > LIMIAR_VENTO_VENTOSO_MS) contagem.ventoso++;
+        else contagem.calmo++;
+      }
+      if (filtros.temperatura && filtros.umidade && indiceCalorMax > LIMIAR_DESCONFORTO_HEAT_INDEX_C) contagem.desconforto++;
+      
+      contagem.total++;
+    }
 
-    // 🕐 Probabilidade por hora
-    const probabilidadePorHora: Record<string, Probabilidade> = {}
-    for (const [hora, c] of Object.entries(contagemPorHora)) {
-      probabilidadePorHora[hora] = {
-        quente: probPorHora(c.quente, c.total),
-        frio: probPorHora(c.frio, c.total),
-        chuva: probPorHora(c.chuva, c.total),
-        vento: probPorHora(c.vento, c.total),
-        desconforto: probPorHora(c.desconforto, c.total),
+    if (anosValidos === 0) return null;
+
+    const respostaFinal: any = {};
+    const prob = (x: number, total: number) => total > 0 ? ((x / total) * 100).toFixed(1) : '0.0';
+
+    const probabilidadesPorHora: Record<string, any> = {};
+
+    for (const hora of Object.keys(contagemPorHora)) {
+      const c = contagemPorHora[hora];
+      const horaFormatada = `${hora}:00`;
+      probabilidadesPorHora[horaFormatada] = {};
+
+      if (filtros.temperatura) {
+        probabilidadesPorHora[horaFormatada].temperatura = {
+            muito_quente: prob(c.muitoQuente, c.total) + '%',
+            quente: prob(c.quente, c.total) + '%',
+            frio: prob(c.frio, c.total) + '%',
+        };
+        if (filtros.umidade) {
+            probabilidadesPorHora[horaFormatada].temperatura.desconforto = prob(c.desconforto, c.total) + '%';
+        }
+      }
+      if (filtros.chuva) {
+        probabilidadesPorHora[horaFormatada].chuva = prob(c.chuva, c.total) + '%';
+      }
+      if (filtros.vento) {
+        probabilidadesPorHora[horaFormatada].vento = {
+            muito_ventoso: prob(c.muitoVentoso, c.total) + '%',
+            ventoso: prob(c.ventoso, c.total) + '%',
+            calmo: prob(c.calmo, c.total) + '%',
+        };
+      }
+      // ✅ ADICIONADO: Calcula e insere a média de umidade da hora específica
+      if (filtros.umidade) {
+        const u_hora_stats = umidadePorHora[hora];
+        if (u_hora_stats.count > 0) {
+          probabilidadesPorHora[horaFormatada].umidade_media = (u_hora_stats.soma / u_hora_stats.count).toFixed(1) + '%';
+        } else {
+          probabilidadesPorHora[horaFormatada].umidade_media = 'N/A';
+        }
       }
     }
 
-    return {
-      probabilidade: {
-        quente: prob(contagem.quente),
-        frio: prob(contagem.frio),
-        chuva: prob(contagem.chuva),
-        vento: prob(contagem.vento),
-        desconforto: prob(contagem.desconforto),
-      },
-      probabilidadePorHora,
-      tempMedia: (somaTemp / contagem.total).toFixed(1),
-      confiabilidade: ((anosValidos / rangeYears) * 100).toFixed(1),
-      anosStatus,
-      // results,
+    if (filtros.temperatura) {
+      const probsTemp = {
+        muito_quente: prob(contagem.muitoQuente, contagem.total),
+        quente: prob(contagem.quente, contagem.total),
+        frio: prob(contagem.frio, contagem.total),
+      };
+      respostaFinal.temperatura = {
+        media: (somaTempGeral / anosValidos).toFixed(1) + '°C',
+        probabilidades: probsTemp,
+        nomenclatura_provavel: this.encontrarCategoriaMaisProvavel(probsTemp),
+      };
+      if (filtros.umidade) {
+        respostaFinal.temperatura.prob_desconforto = prob(contagem.desconforto, contagem.total) + '%';
+      }
     }
+
+    if (filtros.chuva) {
+      respostaFinal.chuva = {
+        probabilidade: prob(contagem.chuva, contagem.total) + '%',
+      };
+    }
+
+    if (filtros.vento) {
+      const probsVento = {
+        muito_ventoso: prob(contagem.muitoVentoso, contagem.total),
+        ventoso: prob(contagem.ventoso, contagem.total),
+        calmo: prob(contagem.calmo, contagem.total),
+      };
+      respostaFinal.vento = {
+        probabilidades: probsVento,
+        nomenclatura_provavel: this.encontrarCategoriaMaisProvavel(probsVento),
+      };
+    }
+
+    if (filtros.umidade) {
+      respostaFinal.umidade = {
+        media: (somaUmidGeral / anosValidos).toFixed(1) + '%',
+      };
+    }
+
+    respostaFinal.probabilidades_por_hora = probabilidadesPorHora;
+
+    respostaFinal.meta = {
+      confiabilidade: ((anosValidos / rangeYears) * 100).toFixed(1) + '%',
+      anos_analisados: anosValidos,
+    };
+
+    return respostaFinal;
   }
 }
